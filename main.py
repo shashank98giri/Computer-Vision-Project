@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 import sys
+import scipy
+import pandas as pd
+import seaborn as sn
 
 def gaussianKernel(size_x, size_y, sigma):
 	kernel = np.fromfunction(lambda x, y: (1/(2*math.pi*sigma**2)) * math.e ** ((-1*((x-(size_x-1)/2)**2+(y-(size_y-1)/2)**2))/(2*sigma**2)), (size_x, size_y))
@@ -19,18 +22,22 @@ cv2.imshow('images',images)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 
-def channel():
+def channel():					# arguments are +/- percentages shift
 	full = np.empty(image.shape)
 	GaussianPyr = [] 									# 3 channels
-	for i in range(6):
+	LaplacianPyr = []
+	PyrSize = 8
+
+	for i in range(PyrSize):
 		GaussianPyr.append([])	
+		LaplacianPyr.append([])	
 
 	for i in range(3):
 		img = image[:,:,i]
 		img2 = image2[:,:,i]		
 		rows, cols = img.shape
-		threshold_low = 10
-		threshold_high = 10 
+		threshold_low = 5
+		threshold_high = 30 
 		
 		img_dft = cv2.dft(np.float32(img), flags=cv2.DFT_COMPLEX_OUTPUT)
 		img_shift = np.fft.fftshift(img_dft)
@@ -53,9 +60,16 @@ def channel():
 		full[:,:,i] = tot_inv        
 
 		G = tot_inv
-		for j in range(6):
+		for j in range(PyrSize):
 			GaussianPyr[j].append(G)
 			G = cv2.pyrDown(G) 
+
+		for j in range(PyrSize-1, 0, -1):
+		    GE = cv2.pyrUp(GaussianPyr[j][i])
+		    tupShape = GaussianPyr[j-1][i].shape
+		    GE = cv2.resize(GE, tupShape, interpolation = cv2.INTER_CUBIC)
+		    L = cv2.subtract(GaussianPyr[j-1][i], GE)
+		    LaplacianPyr[j-1].append(L)
 
 	#--------------------------------------------------------------------------------
 	full /= np.max(full)
@@ -66,8 +80,8 @@ def channel():
 	#--------------------------------------------------------------------------------
 	# generate Gaussian pyramid for Hybrid image
 
-	imageList = []	
-	for i in range(6):
+	GaussianList = []	
+	for i in range(PyrSize):
 		tupSize = GaussianPyr[i][0].shape
 		fullImage = np.empty((tupSize[0], tupSize[1], 3))
 		for j in range(3):
@@ -75,15 +89,54 @@ def channel():
 
 		fullImage /= np.max(fullImage)
 		fullImage = cv2.resize(fullImage, (200,200), interpolation = cv2.INTER_CUBIC)
-		imageList.append(fullImage)
+		GaussianList.append(fullImage)
 
-	imageTuple = tuple(imageList)
+	imageTuple = tuple(GaussianList)
 	images = np.concatenate(imageTuple, axis = 1)
 
 	cv2.imshow('Gaussian', images)
 	cv2.waitKey(0)
 	cv2.destroyAllWindows()
 	cv2.imwrite('GaussianPyr.jpeg', np.int32(images*255))
+	#--------------------------------------------------------------------
+	# generate Laplacian pyramid for Hybrid image
+
+	LaplacianList = []	
+	for i in range(PyrSize - 1):
+		tupSize = LaplacianPyr[i][0].shape
+		fullImage = np.empty((tupSize[0], tupSize[1], 3))
+		for j in range(3):
+			fullImage[:,:,j] = LaplacianPyr[i][j]
+
+		fullImage /= np.max(fullImage)
+		fullImage = cv2.resize(fullImage, (200,200), interpolation = cv2.INTER_CUBIC)
+		LaplacianList.append(fullImage)
+
+	imageTuple = tuple(LaplacianList)
+	images = np.concatenate(imageTuple, axis = 1)
+
+	cv2.imshow('Laplacian', images)
+	cv2.waitKey(0)
+	cv2.destroyAllWindows()
+	cv2.imwrite('LaplacianPyr.jpeg', np.int32(images*255))
+	#--------------------------------------------------------------------
+	# generate Correlation matrix for Laplacian images
+
+	data = {}
+	cols = []
+
+	for i in range(PyrSize - 1):
+		col = 'L' + str(i)
+		data[col] = LaplacianList[i].flatten()
+		cols.append(col)
+
+	df = pd.DataFrame(data, columns=cols)
+
+	corrMatrix = df.corr()
+	print (corrMatrix)
+	fig = sn.heatmap(corrMatrix, annot=True).get_figure()
+	fig.show()
+	fig.savefig('CorrelationMatrix.png')
 
 #--------------------------------------------------------------------
 channel()
